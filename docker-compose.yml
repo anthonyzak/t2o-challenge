@@ -1,0 +1,91 @@
+version: "3.8"
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+    networks:
+      - weather-api-network
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=weather_app_db
+      - POSTGRES_USER=weather_app
+      - POSTGRES_PASSWORD=password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - weather-api-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weather_app -d weather_app_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - weather-api-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  celery-worker:
+    build: .
+    command: celery -A app.worker worker --loglevel=info --queues=weather_import,maintenance
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./:/app
+    networks:
+      - weather-api-network
+
+  celery-beat:
+    build: .
+    command: celery -A app.worker beat --loglevel=info
+    depends_on:
+      - db
+      - redis
+    networks:
+      - weather-api-network
+    volumes:
+      - ./:/app
+
+  celery-flower:
+    build: .
+    command: celery -A app.worker flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    networks:
+      - weather-api-network
+
+networks:
+  weather-api-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
